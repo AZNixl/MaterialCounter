@@ -25,7 +25,7 @@ class CameraActivity : AppCompatActivity() {
     
     private lateinit var previewView: PreviewView
     private lateinit var tvResult: TextView
-    private lateinit var btnCapture: Button
+    private lateinit var btnCapture: com.google.android.material.floatingactionbutton.FloatingActionButton
     private lateinit var cameraExecutor: ExecutorService
     
     private var imageCapture: ImageCapture? = null
