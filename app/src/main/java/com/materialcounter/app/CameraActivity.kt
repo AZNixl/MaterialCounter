@@ -2,12 +2,8 @@ package com.materialcounter.app
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
+import android.graphics.*
 import android.os.Bundle
-import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
 import android.widget.ImageView
@@ -19,9 +15,11 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.drawable.toBitmap
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.objects.ObjectDetection
+import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
@@ -42,14 +40,9 @@ class CameraActivity : AppCompatActivity() {
     
     private var imageCapture: ImageCapture? = null
     private var capturedBitmap: Bitmap? = null
-    private var markerPoints = mutableListOf<Pair<Float, Float>>()
+    private var detectedObjects = mutableListOf<RectF>()
     
     private val markerPaint = Paint().apply {
-        color = Color.RED
-        style = Paint.Style.FILL
-    }
-    
-    private val circlePaint = Paint().apply {
         color = Color.RED
         style = Paint.Style.STROKE
         strokeWidth = 8f
@@ -61,6 +54,11 @@ class CameraActivity : AppCompatActivity() {
         style = Paint.Style.FILL
         textAlign = Paint.Align.CENTER
         isFakeBoldText = true
+    }
+    
+    private val textBgPaint = Paint().apply {
+        color = Color.RED
+        style = Paint.Style.FILL
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -138,7 +136,8 @@ class CameraActivity : AppCompatActivity() {
                     imageProxy.close()
                     
                     runOnUiThread {
-                        showPhotoForMarking(bitmap)
+                        tvStatus.text = "识别中..."
+                        detectObjects(bitmap)
                     }
                 }
                 
@@ -156,106 +155,103 @@ class CameraActivity : AppCompatActivity() {
         )
     }
     
-    @SuppressLint("ClickableViewAccessibility")
-    private fun showPhotoForMarking(bitmap: Bitmap) {
+    private fun detectObjects(bitmap: Bitmap) {
         capturedBitmap = bitmap
-        markerPoints.clear()
+        detectedObjects.clear()
+        
+        // 配置物体检测器
+        val options = ObjectDetectorOptions.Builder()
+            .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
+            .enableMultipleObjects()
+            .enableClassification()
+            .build()
+        
+        val detector = ObjectDetection.getClient(options)
+        val image = InputImage.fromBitmap(bitmap, 0)
+        
+        detector.process(image)
+            .addOnSuccessListener { detectedObjectsList ->
+                // 收集所有检测到的物体边界框
+                detectedObjectsList.forEach { obj ->
+                    detectedObjects.add(obj.boundingBox)
+                }
+                
+                runOnUiThread {
+                    if (detectedObjects.isEmpty()) {
+                        Toast.makeText(this, "未识别到物体，请重新拍照", Toast.LENGTH_LONG).show()
+                        tvStatus.text = "未识别到物体"
+                    } else {
+                        showDetectionResult()
+                    }
+                }
+            }
+            .addOnFailureListener { e ->
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        "识别失败: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    tvStatus.text = "识别失败，请重新拍照"
+                }
+            }
+    }
+    
+    private fun showDetectionResult() {
+        val bitmap = capturedBitmap ?: return
         
         // 隐藏相机预览
         previewView.visibility = View.GONE
         btnCapture.visibility = View.GONE
         
-        // 显示图片和标记界面
+        // 显示结果
         imageView.visibility = View.VISIBLE
         tvStatus.visibility = View.VISIBLE
         tvCount.visibility = View.VISIBLE
         resultPanel.visibility = View.VISIBLE
         
-        imageView.setImageBitmap(bitmap)
-        tvStatus.text = "点击照片标记每个材料的一端"
-        updateCount()
-        
-        // 监听点击事件在照片上标记
-        imageView.setOnTouchListener { v, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                val x = event.x
-                val y = event.y
-                
-                // 将屏幕坐标转换为图片坐标
-                val imageViewWidth = imageView.width.toFloat()
-                val imageViewHeight = imageView.height.toFloat()
-                val bitmapWidth = bitmap.width.toFloat()
-                val bitmapHeight = bitmap.height.toFloat()
-                
-                // 计算图片在 ImageView 中的实际显示区域（fitCenter）
-                val imageRatio = bitmapWidth / bitmapHeight
-                val viewRatio = imageViewWidth / imageViewHeight
-                
-                val scaleX: Float
-                val scaleY: Float
-                val offsetX: Float
-                val offsetY: Float
-                
-                if (imageRatio > viewRatio) {
-                    // 图片更宽，以宽度为准
-                    scaleX = bitmapWidth / imageViewWidth
-                    scaleY = scaleX
-                    val scaledHeight = bitmapHeight / scaleY
-                    offsetX = 0f
-                    offsetY = (imageViewHeight - scaledHeight) / 2f
-                } else {
-                    // 图片更高，以高度为准
-                    scaleY = bitmapHeight / imageViewHeight
-                    scaleX = scaleY
-                    val scaledWidth = bitmapWidth / scaleX
-                    offsetX = (imageViewWidth - scaledWidth) / 2f
-                    offsetY = 0f
-                }
-                
-                val imageX = (x - offsetX) * scaleX
-                val imageY = (y - offsetY) * scaleY
-                
-                // 检查是否在图片范围内
-                if (imageX >= 0 && imageX <= bitmapWidth && imageY >= 0 && imageY <= bitmapHeight) {
-                    markerPoints.add(Pair(imageX, imageY))
-                    updateMarkedImage()
-                    updateCount()
-                }
-                
-                true
-            } else {
-                false
-            }
-        }
-    }
-    
-    private fun updateMarkedImage() {
-        val bitmap = capturedBitmap ?: return
+        // 绘制标记
         val markedBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(markedBitmap)
         
-        markerPoints.forEachIndexed { index, point ->
-            // 绘制红色圆圈标记
-            canvas.drawCircle(point.first, point.second, 40f, circlePaint)
-            canvas.drawCircle(point.first, point.second, 15f, markerPaint)
+        detectedObjects.forEachIndexed { index, rect ->
+            // 绘制边框
+            canvas.drawRect(rect, markerPaint)
+            
+            // 绘制编号背景
+            val text = "${index + 1}"
+            val textBounds = Rect()
+            textPaint.getTextBounds(text, 0, text.length, textBounds)
+            val textWidth = textBounds.width() + 20f
+            val textHeight = textBounds.height() + 20f
+            
+            val textX = rect.centerX()
+            val textY = rect.top - 10f
+            
+            canvas.drawRect(
+                textX - textWidth / 2,
+                textY - textHeight,
+                textX + textWidth / 2,
+                textY,
+                textBgPaint
+            )
             
             // 绘制编号
-            canvas.drawText("${index + 1}", point.first, point.second + 20f, textPaint)
+            canvas.drawText(text, textX, textY - 10f, textPaint)
         }
         
         imageView.setImageBitmap(markedBitmap)
-    }
-    
-    private fun updateCount() {
-        val count = markerPoints.size
+        
+        val count = detectedObjects.size
         tvCount.text = "$count"
-        tvResultCount.text = "已标记: $count 个"
+        tvResultCount.text = "识别到: $count 个物体"
+        tvStatus.text = "识别完成"
     }
     
     private fun saveRecord() {
-        val count = markerPoints.size
+        val count = detectedObjects.size
         if (count == 0) {
-            Toast.makeText(this, "请先标记物体", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "没有识别到物体", Toast.LENGTH_SHORT).show()
             return
         }
         
@@ -286,7 +282,7 @@ class CameraActivity : AppCompatActivity() {
         previewView.visibility = View.VISIBLE
         btnCapture.visibility = View.VISIBLE
         
-        // 隐藏图片和标记界面
+        // 隐藏结果
         imageView.visibility = View.GONE
         tvCount.visibility = View.GONE
         resultPanel.visibility = View.GONE
@@ -296,7 +292,7 @@ class CameraActivity : AppCompatActivity() {
         
         // 清空数据
         capturedBitmap = null
-        markerPoints.clear()
+        detectedObjects.clear()
     }
     
     override fun onDestroy() {
