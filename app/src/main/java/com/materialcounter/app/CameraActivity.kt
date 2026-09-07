@@ -2,8 +2,16 @@ package com.materialcounter.app
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.os.Bundle
+import android.view.MotionEvent
+import android.view.View
 import android.widget.Button
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -11,11 +19,9 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
-import com.google.mlkit.vision.barcode.BarcodeScanning
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.common.InputImage
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.ExecutorService
@@ -24,26 +30,68 @@ import java.util.concurrent.Executors
 class CameraActivity : AppCompatActivity() {
     
     private lateinit var previewView: PreviewView
-    private lateinit var tvResult: TextView
+    private lateinit var tvStatus: TextView
+    private lateinit var tvCount: TextView
     private lateinit var btnCapture: com.google.android.material.floatingactionbutton.FloatingActionButton
+    private lateinit var imageView: ImageView
+    private lateinit var resultPanel: LinearLayout
+    private lateinit var tvResultCount: TextView
+    private lateinit var btnSave: Button
+    private lateinit var btnCancel: Button
     private lateinit var cameraExecutor: ExecutorService
     
     private var imageCapture: ImageCapture? = null
-    private val scannedCodes = mutableSetOf<String>()
+    private var capturedBitmap: Bitmap? = null
+    private var markerPoints = mutableListOf<Pair<Float, Float>>()
+    
+    private val markerPaint = Paint().apply {
+        color = Color.RED
+        style = Paint.Style.FILL
+    }
+    
+    private val circlePaint = Paint().apply {
+        color = Color.RED
+        style = Paint.Style.STROKE
+        strokeWidth = 8f
+    }
+    
+    private val textPaint = Paint().apply {
+        color = Color.WHITE
+        textSize = 50f
+        style = Paint.Style.FILL
+        textAlign = Paint.Align.CENTER
+        isFakeBoldText = true
+    }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_camera)
         
         previewView = findViewById(R.id.viewFinder)
-        tvResult = findViewById(R.id.tvResultCount)
+        tvStatus = findViewById(R.id.tvStatus)
+        tvCount = findViewById(R.id.tvCount)
         btnCapture = findViewById(R.id.btnCapture)
+        imageView = findViewById(R.id.imageView)
+        resultPanel = findViewById(R.id.resultPanel)
+        tvResultCount = findViewById(R.id.tvResultCount)
+        btnSave = findViewById(R.id.btnSave)
+        btnCancel = findViewById(R.id.btnCancel)
         
         cameraExecutor = Executors.newSingleThreadExecutor()
         
         btnCapture.setOnClickListener {
-            captureAndAnalyze()
+            capturePhoto()
         }
+        
+        btnSave.setOnClickListener {
+            saveRecord()
+        }
+        
+        btnCancel.setOnClickListener {
+            resetToCamera()
+        }
+        
+        tvStatus.text = "点击拍照按钮拍摄材料"
         
         startCamera()
     }
@@ -79,39 +127,18 @@ class CameraActivity : AppCompatActivity() {
     }
     
     @SuppressLint("UnsafeOptInUsageError")
-    private fun captureAndAnalyze() {
-        tvResult.text = getString(R.string.scanning)
+    private fun capturePhoto() {
+        tvStatus.text = "拍摄中..."
         
         imageCapture?.takePicture(
             cameraExecutor,
             object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(imageProxy: ImageProxy) {
-                    val mediaImage = imageProxy.image
-                    if (mediaImage != null) {
-                        val image = InputImage.fromMediaImage(
-                            mediaImage,
-                            imageProxy.imageInfo.rotationDegrees
-                        )
-                        
-                        val scanner = BarcodeScanning.getClient()
-                        scanner.process(image)
-                            .addOnSuccessListener { barcodes ->
-                                processBarcodes(barcodes)
-                            }
-                            .addOnFailureListener { e ->
-                                runOnUiThread {
-                                    Toast.makeText(
-                                        this@CameraActivity,
-                                        "识别失败: ${e.message}",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            }
-                            .addOnCompleteListener {
-                                imageProxy.close()
-                            }
-                    } else {
-                        imageProxy.close()
+                    val bitmap = imageProxy.toBitmap()
+                    imageProxy.close()
+                    
+                    runOnUiThread {
+                        showPhotoForMarking(bitmap)
                     }
                 }
                 
@@ -122,35 +149,116 @@ class CameraActivity : AppCompatActivity() {
                             "拍照失败: ${exception.message}",
                             Toast.LENGTH_SHORT
                         ).show()
+                        tvStatus.text = "点击拍照按钮拍摄材料"
                     }
                 }
             }
         )
     }
     
-    private fun processBarcodes(barcodes: List<Barcode>) {
-        for (barcode in barcodes) {
-            barcode.rawValue?.let { value ->
-                scannedCodes.add(value)
-            }
-        }
+    @SuppressLint("ClickableViewAccessibility")
+    private fun showPhotoForMarking(bitmap: Bitmap) {
+        capturedBitmap = bitmap
+        markerPoints.clear()
         
-        val count = scannedCodes.size
-        val resultText = getString(R.string.count_result, count)
+        // 隐藏相机预览
+        previewView.visibility = View.GONE
+        btnCapture.visibility = View.GONE
         
-        runOnUiThread {
-            tvResult.text = resultText
-            
-            if (count > 0) {
-                saveRecord(count)
-                Toast.makeText(this, "已识别 $count 个材料码", Toast.LENGTH_SHORT).show()
+        // 显示图片和标记界面
+        imageView.visibility = View.VISIBLE
+        tvStatus.visibility = View.VISIBLE
+        tvCount.visibility = View.VISIBLE
+        resultPanel.visibility = View.VISIBLE
+        
+        imageView.setImageBitmap(bitmap)
+        tvStatus.text = "点击照片标记每个材料的一端"
+        updateCount()
+        
+        // 监听点击事件在照片上标记
+        imageView.setOnTouchListener { v, event ->
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                val x = event.x
+                val y = event.y
+                
+                // 将屏幕坐标转换为图片坐标
+                val imageViewWidth = imageView.width.toFloat()
+                val imageViewHeight = imageView.height.toFloat()
+                val bitmapWidth = bitmap.width.toFloat()
+                val bitmapHeight = bitmap.height.toFloat()
+                
+                // 计算图片在 ImageView 中的实际显示区域（fitCenter）
+                val imageRatio = bitmapWidth / bitmapHeight
+                val viewRatio = imageViewWidth / imageViewHeight
+                
+                val scaleX: Float
+                val scaleY: Float
+                val offsetX: Float
+                val offsetY: Float
+                
+                if (imageRatio > viewRatio) {
+                    // 图片更宽，以宽度为准
+                    scaleX = bitmapWidth / imageViewWidth
+                    scaleY = scaleX
+                    val scaledHeight = bitmapHeight / scaleY
+                    offsetX = 0f
+                    offsetY = (imageViewHeight - scaledHeight) / 2f
+                } else {
+                    // 图片更高，以高度为准
+                    scaleY = bitmapHeight / imageViewHeight
+                    scaleX = scaleY
+                    val scaledWidth = bitmapWidth / scaleX
+                    offsetX = (imageViewWidth - scaledWidth) / 2f
+                    offsetY = 0f
+                }
+                
+                val imageX = (x - offsetX) * scaleX
+                val imageY = (y - offsetY) * scaleY
+                
+                // 检查是否在图片范围内
+                if (imageX >= 0 && imageX <= bitmapWidth && imageY >= 0 && imageY <= bitmapHeight) {
+                    markerPoints.add(Pair(imageX, imageY))
+                    updateMarkedImage()
+                    updateCount()
+                }
+                
+                true
             } else {
-                Toast.makeText(this, "未识别到条形码或二维码", Toast.LENGTH_SHORT).show()
+                false
             }
         }
     }
     
-    private fun saveRecord(count: Int) {
+    private fun updateMarkedImage() {
+        val bitmap = capturedBitmap ?: return
+        val markedBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(markedBitmap)
+        
+        markerPoints.forEachIndexed { index, point ->
+            // 绘制红色圆圈标记
+            canvas.drawCircle(point.first, point.second, 40f, circlePaint)
+            canvas.drawCircle(point.first, point.second, 15f, markerPaint)
+            
+            // 绘制编号
+            canvas.drawText("${index + 1}", point.first, point.second + 20f, textPaint)
+        }
+        
+        imageView.setImageBitmap(markedBitmap)
+    }
+    
+    private fun updateCount() {
+        val count = markerPoints.size
+        tvCount.text = "$count"
+        tvResultCount.text = "已标记: $count 个"
+    }
+    
+    private fun saveRecord() {
+        val count = markerPoints.size
+        if (count == 0) {
+            Toast.makeText(this, "请先标记物体", Toast.LENGTH_SHORT).show()
+            return
+        }
+        
         val prefs = getSharedPreferences("material_counter", Context.MODE_PRIVATE)
         val gson = Gson()
         
@@ -168,6 +276,27 @@ class CameraActivity : AppCompatActivity() {
         }
         
         prefs.edit().putString("history", gson.toJson(history)).apply()
+        
+        Toast.makeText(this, "已保存：$count 个", Toast.LENGTH_SHORT).show()
+        finish()
+    }
+    
+    private fun resetToCamera() {
+        // 显示相机预览
+        previewView.visibility = View.VISIBLE
+        btnCapture.visibility = View.VISIBLE
+        
+        // 隐藏图片和标记界面
+        imageView.visibility = View.GONE
+        tvCount.visibility = View.GONE
+        resultPanel.visibility = View.GONE
+        
+        tvStatus.text = "点击拍照按钮拍摄材料"
+        tvStatus.visibility = View.VISIBLE
+        
+        // 清空数据
+        capturedBitmap = null
+        markerPoints.clear()
     }
     
     override fun onDestroy() {

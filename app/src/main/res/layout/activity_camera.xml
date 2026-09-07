@@ -15,6 +15,18 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
+    <ImageView
+        android:id="@+id/imageView"
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:scaleType="fitCenter"
+        android:visibility="gone"
+        android:contentDescription="拍摄的照片"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toTopOf="@+id/controlPanel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
     <TextView
         android:id="@+id/tvStatus"
         android:layout_width="wrap_content"
@@ -37,9 +49,11 @@
         android:textColor="@color/white"
         android:textSize="48sp"
         android:textStyle="bold"
+        android:background="#80000000"
+        android:padding="16dp"
         android:visibility="gone"
         app:layout_constraintTop_toTopOf="parent"
-        app:layout_constraintBottom_toBottomOf="@+id/viewFinder"
+        app:layout_constraintBottom_toBottomOf="@+id/imageView"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent" />
 
@@ -72,22 +86,15 @@
             android:layout_marginTop="16dp">
 
             <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/count_result"
-                android:textColor="@color/white"
-                android:textSize="16sp"
-                android:layout_marginBottom="8dp"/>
-
-            <TextView
                 android:id="@+id/tvResultCount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text=""
                 android:textColor="@color/white"
-                android:textSize="24sp"
+                android:textSize="18sp"
                 android:textStyle="bold"
-                android:layout_marginBottom="16dp"/>
+                android:layout_marginBottom="16dp"
+                android:layout_gravity="center"/>
 
             <LinearLayout
                 android:layout_width="match_parent"
