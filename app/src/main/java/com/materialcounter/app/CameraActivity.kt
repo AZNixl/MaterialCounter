@@ -40,7 +40,7 @@ class CameraActivity : AppCompatActivity() {
     
     private var imageCapture: ImageCapture? = null
     private var capturedBitmap: Bitmap? = null
-    private var detectedObjects = mutableListOf<RectF>()
+    private var detectedObjects = mutableListOf<Rect>()
     
     private val markerPaint = Paint().apply {
         color = Color.RED
@@ -225,8 +225,8 @@ class CameraActivity : AppCompatActivity() {
             val textWidth = textBounds.width() + 20f
             val textHeight = textBounds.height() + 20f
             
-            val textX = rect.centerX()
-            val textY = rect.top - 10f
+            val textX = rect.centerX().toFloat()
+            val textY = rect.top.toFloat() - 10f
             
             canvas.drawRect(
                 textX - textWidth / 2,
