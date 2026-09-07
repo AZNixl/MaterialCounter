@@ -35,9 +35,9 @@ class CameraActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_camera)
         
-        previewView = findViewById(R.id.preview_view)
-        tvResult = findViewById(R.id.tv_result)
-        btnCapture = findViewById(R.id.btn_capture)
+        previewView = findViewById(R.id.viewFinder)
+        tvResult = findViewById(R.id.tvResultCount)
+        btnCapture = findViewById(R.id.btnCapture)
         
         cameraExecutor = Executors.newSingleThreadExecutor()
         
